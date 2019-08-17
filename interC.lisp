@@ -165,13 +165,13 @@
   (not (null (cdr intline))))
 
 (defun process_intline(intline) ;;Recibe una linea tipo (a = (algo)) y la procesa
-  (cond ((is_value (cddr intline)) (defparameter *variables* (asignar_valor (car intline) (caddr intline) *variables*)))
-	((is_variable (cddr intline)) (defparameter *variables* (asignar_valor (car intline) (pertvar (caddr intline) *variables*) *variables*)))
-	((is_operation (cddr intline)) (defparameter *variables* (asignar_valor (car intline) (solveoperation (cddr intline)) *variables*)))
+  (cond ((is_value (cddr intline)) (setq *variables* (asignar_valor (car intline) (caddr intline) *variables*)))
+	((is_variable (cddr intline)) (setq *variables* (asignar_valor (car intline) (pertvar (caddr intline) *variables*) *variables*)))
+	((is_operation (cddr intline)) (setq *variables* (asignar_valor (car intline) (solveoperation (cddr intline)) *variables*)))
 	(t (error 'ERROR_DE_SINTAXIS))))
 
 (defun send_intline(asignacion) ;;Verifica sintaxis y manda la linea de asignacion tipo (a = (algo))
-  (cond ((and (null (cadr asignacion)) (symbolp (car asignacion))) (defparameter *variables* (append *variables* asignacion)))
+  (cond ((and (null (cadr asignacion)) (symbolp (car asignacion))) (setq *variables* (append *variables* asignacion)))
 	((not (symbolp (car asignacion))) (error 'ERROR_DE_SINTAXIS))
 	((not (eq (cadr asignacion) '=)) (error 'ERROR_DE_SINTAXIS))
 	(t (process_intline asignacion))))
@@ -180,7 +180,7 @@
   (dolist (intline intcode 'SUCCESS) (send_intline intline)))
 
 (defun add_result(result) ;;Agrega outputs del programa
-  (defparameter *results* (append *results* (list result)))
+  (setq *results* (append *results* (list result)))
   )
 
 (defun print_result(results) ;;Imprimila salida del programa
@@ -188,11 +188,11 @@
   )
 
 (defun add_funcion(name variables code) ;;Agrega la funcion
-  (defparameter *funciones* (append *funciones* (list name variables code)))
+  (setq *funciones* (append *funciones* (list name variables code)))
   )
 
 (defun scan(name) ;;scanf que asigna y lee la entrada del teclado
-  (defparameter *scan_value* (read))
+  (setq *scan_value* (read))
   (process_intline (list name '= *scan_value*))
   )
 
@@ -230,22 +230,26 @@
 
 (defun runfun(funcion varvalues)
   (add_stackvar)
-  (defparameter *variables* (list 'int))
   (if (null varvalues)
       nil
       (send_all_variables (name_variables (cadr funcion)) (value_variables varvalues)))
   (runc (caddr funcion))
   (restore_var)
+  (setq *stackvar* (restore_stackvar *stackvar*))
   )
 
 (defun add_stackvar() ;;Agrega las variables actuales a un "stack" de variales
   (if (null *stackvar*)
-      (defparameter *stackvar* (list *variables*))
-      (defparameter *stackvar* (append  *stackvar* (list *variables*)))
+      (setq *stackvar* (list *variables*))
+      (setq *stackvar* (append  *stackvar* (list *variables*)))
   ))
 
 (defun restore_var() ;;Restaura las ultimas variables usadas antes de entrar a una funcion
-  (defparameter *variables* (car (last *stackvar*))))
+  (setq *variables* (car (last *stackvar*))))
+
+(defun restore_stackvar(stack)
+  (reverse (cdr (reverse stack))))
+
 
 (defun name_variables(varnames) ;;Arma la lista de nombres de las variables
   (if (null (car varnames))
@@ -271,15 +275,21 @@
       (mapcar #'new_variables names values)
       (error 'CANTIDAD_DE_VARIABLES_INCORRECTA)))
 
+(defun void_vars(variables);; Resuelve todas las expresiones de variables a enviar en un proceso
+  (cond ((null (car variables)) nil)
+	((atom (car variables)) (cons (solveoperation (list (car variables))) (void_vars (cdr variables))))
+	(t (cons (solveoperation (car variables)) (void_vars (cdr variables))))))
+
+
 (defun run(code) ;;Defino los parametros que voy a usar y corro el programa
-  (defparameter *variables* (list 'int))
-  (defparameter *stackvar* nil)
-  (defparameter *results* nil)
-  (defparameter *scan_value* nil)
-  (defparameter *constants* (list 'def))
-  (defparameter *funciones* nil)
-  (defvar *condicionales* (list '== '< '> '<= '>=))
-  (defvar *separators* (list '+ '- '* '/))
+  (setq *variables* (list 'int))
+  (setq *stackvar* nil)
+  (setq *results* nil)
+  (setq *scan_value* nil)
+  (setq *constants* (list 'def))
+  (setq *funciones* nil)
+  (setq *condicionales* (list '== '< '> '<= '>=))
+  (setq *separators* (list '+ '- '* '/))
   (runc code)
   *results*)
 
@@ -311,31 +321,33 @@
 	  ((eq (car linecode) 'while) (if (solve_cond (cadr linecode))
 					  (progn (runc (caddr linecode)) (runc (list linecode)))
 					  nil))
-	  ((eq (car linecode) 'define) (cond ((not (symbolp (cadr linecode))) (error 'NOMBRE_INVALIDO))
+	  ((eq (car linecode) 'define) (cond ((not (symbolp (cadr linecode))) (error 'NOMBRE_INVALIDO))8
 					    ((not (numberp (caddr linecode))) (error 'VALOR_INVALIDO))
-					    (t (defparameter *constants* (asignar_valor (cadr linecode) (caddr linecode) *constants*)))))
+					    (t (setq *constants* (asignar_valor (cadr linecode) (caddr linecode) *constants*)))))
   
 	  ((eq (car linecode) 'void) (cond ((not (null (pertfun (cadr linecode) *funciones*))) (error 'VARIABLE_YA_DEFINIDA))
 					   (t (add_funcion (cadr linecode) (caddr linecode) (cadddr linecode)))))
-	  ((pert (car linecode) *funciones*) (runfun (pertfun (car linecode) *funciones*) (list (solveoperation (cadr linecode)))))
+	  ((pert (car linecode) *funciones*) (runfun (pertfun (car linecode) *funciones*) (void_vars (cadr linecode))))
 	  )))
 
-(run '((int (a = 0)(b = 3)(c = 5))
+(run '((int (a = 13)(b = 3)(c = 5))
        (define cte 7)
-       (void print6 ((int b)) (
-			(printf b)
-			(printf cte)
-			(scanf a)
-			       (printf a)
-			       (printf (c = a + cte))
-			)
+       (void print6 ((int b) (int c)) (
+				       (int (a = 12))
+				       (printf b)
+				       (printf c)
+				       (printf a)
+				       )
 	)
        (main (
-	      (print6 ((b + 3)))
-	      (printf (b + c + 1))
-	      (printf cte))))
+	      (print6 (10 11))
+	      (printf a)
+	      )
+	)
+       )
      
      )
+
 
 
 
