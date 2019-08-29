@@ -1,5 +1,6 @@
 ;;choclo de parametros para que no moleste al compilar todo el archivo
 (defparameter *variables* (list 'int))
+(defparameter *localvar* (list 'int))
 (defparameter *stackvar* nil)
 (defparameter *results* nil)
 (defparameter *scan_value* nil)
@@ -8,7 +9,15 @@
 (defvar *condicionales* (list '== '< '> '<= '>=))
 (defvar *separators* (list '+ '- '* '/))
 (defvar strcond)
- 
+
+(defparameter *log* nil)
+
+(defun myremove (item tree)
+  (if (atom tree)
+      tree
+      (mapcar (lambda (subtree) (myremove item subtree))
+              (remove item tree :test #'equal))))
+
 (defun remove-brackets (lst)
   "Reduses lists with just one item to the item itself"
   (do ((result lst (car result)))
@@ -98,7 +107,7 @@
       nil
       (if (eq atom (car listom))
 	  (list (car listom) (cadr listom) (caddr listom))
-	  (pertVar atom (cdddr listom)))
+	  (pertfun atom (cdddr listom)))
   )
   )
 
@@ -110,6 +119,35 @@
 	  (pert atom (cdr listom)))
   )
   )
+
+(defun pert_rec(at li)
+  (cond ((null (car li)) nil)
+	((atom (car li)) (if (eq (car li) at)
+			     t
+			     (pert_rec at (cdr li))))
+	(t (or (pert_rec at (car li)) (pert_rec at (cdr li))))))
+
+
+
+(defun pert_rec_int(at li)
+  (cond ((null (car li)) nil)
+	((atom (car li)) (if (eq (car li) at)
+			     (append (cdr li) (pert_rec_int at (cdr li)))
+			     (pert_rec_int at (cdr li))))
+	(t (append (pert_rec_int at (car li)) (pert_rec_int at (cdr li))))))
+
+;;solucionar int aux para que devuelva los int
+;;agregar que busque todos los int en el log y con eso compare 
+
+(defun pert_int(var log)
+  (defvar aux)
+  (setq aux (pert_rec_int 'int log))
+  (if (pert var *stackvar*)
+      (if (or (pert_rec var aux) (pert_rec var *voidvar*))
+	  t 
+	  nil)
+      nil))
+
 
 
 (defun pert_sec(list secuencia) ;;Pert, pero busca si en la lista hay algun elemento de la secuencia
@@ -137,8 +175,10 @@
 
 ;;(buildoperation '(10 * c + 3) *variables* *separators*)
 
-(defun solveOperation(operation);; Pasa la expresion a notacion prefija y la evalua.
-  (eval (infix->prefix (buildoperation operation *variables* *separators*) *separators*))
+(defun solveOperation(operation &optional global);; Pasa la expresion a notacion prefija y la evalua.
+
+     ;; (eval (infix->prefix (buildoperation operation *stackvar* *separators*) *separators*))
+      (eval (infix->prefix (buildoperation operation *variables* *separators*) *separators*))
   )
 
 ;;(solveoperation '((10 + z) * (12 - c)))
@@ -153,7 +193,7 @@
 				       (append (cons (car variables) (list '= value)) (cdr variables))))
 	(t (cons (car variables) (asignar_valor name value (cdr variables))))))
 
-;;(asignar_valor 'b '3 *variables*)
+;;(asignar_valor 'b '5 *variables*)
 
 (defun is_value(intline) ;;Verifica si luego de la igualdad hay un valor
   (and (null (cdr intline)) (numberp (car intline))))
@@ -164,11 +204,27 @@
 (defun is_operation(intline) ;;Also same pero operacion
   (not (null (cdr intline))))
 
-(defun process_intline(intline) ;;Recibe una linea tipo (a = (algo)) y la procesa
+(defun process_intline(intline &optional global) ;;Recibe una linea tipo (a = (algo)) y la procesa
   (cond ((is_value (cddr intline)) (setq *variables* (asignar_valor (car intline) (caddr intline) *variables*)))
 	((is_variable (cddr intline)) (setq *variables* (asignar_valor (car intline) (pertvar (caddr intline) *variables*) *variables*)))
 	((is_operation (cddr intline)) (setq *variables* (asignar_valor (car intline) (solveoperation (cddr intline)) *variables*)))
+	(t (error 'ERROR_DE_SINTAXIS)))
+  (if (eq global t)
+      (cond ((is_value (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (caddr intline) *stackvar*)))
+      	((is_variable (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (pertvar (caddr intline) *stackvar*) *stackvar*)))
+      	((is_operation (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (solveoperation (cddr intline) t) *stackvar*)))
+      	(t (error 'ERROR_DE_SINTAXIS)))
+      nil
+      ))
+
+(setq *stackvar* (asignar_valor 'd '12 *stackvar*))
+
+(defun process_intline_var(intline) ;;Recibe una linea tipo (a = (algo)) y la procesa
+  (cond ((is_value (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (caddr intline) *stackvar*)))
+	((is_variable (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (pertvar (caddr intline) *stackvar*) *stackvar*)))
+	((is_operation (cddr intline)) (setq *stackvar* (asignar_valor (car intline) (solveoperation (cddr intline)) *stackvar*)))
 	(t (error 'ERROR_DE_SINTAXIS))))
+
 
 (defun send_intline(asignacion) ;;Verifica sintaxis y manda la linea de asignacion tipo (a = (algo))
   (cond ((and (null (cadr asignacion)) (symbolp (car asignacion))) (setq *variables* (append *variables* asignacion)))
@@ -230,28 +286,22 @@
 
 (defun runfun(funcion varvalues)
   (add_stackvar)
+  (setq *log* nil)
+  (setq *voidvar* nil)
   (if (null varvalues)
       nil
       (send_all_variables (name_variables (cadr funcion)) (value_variables varvalues)))
   (runc (caddr funcion))
   (restore_var)
-  (setq *stackvar* (restore_stackvar *stackvar*))
   )
 
 (defun add_stackvar() ;;Agrega las variables actuales a un "stack" de variales
-  (if (null *stackvar*)
-      (setq *stackvar* (list *variables*))
-      (setq *stackvar* (append  *stackvar* (list *variables*)))
-  ))
+  (if isglobal
+      (progn (setq isglobal nil)(setq *stackvar* *variables*))
+      (setq *variables* *stackvar*))
+  )
 
-(defun restore_var() ;;Restaura las ultimas variables usadas antes de entrar a una funcion
-  (setq *variables* (car (last *stackvar*))))
-
-(defun restore_stackvar(stack)
-  (reverse (cdr (reverse stack))))
-
-
-(defun name_variables(varnames) ;;Arma la lista de nombres de las variables
+(defun name_variables(varnames) ;;arma la lista de nombres de las variables
   (if (null (car varnames))
       nil
       (cons (cadar varnames) (name_variables (cdr varnames))))
@@ -266,8 +316,13 @@
 	    (value_variables (cdr varvalues))))
   )
 
+(defun restore_var()
+  (setq *variables* *stackvar*))
+
+(defparameter *voidvar* (list 'int))
 (defun new_variables (name value) ;;Arma una linea tipo INT para procesar
   (send_intline (list  name '= value))
+  (setq *voidvar* (append *voidvar* (list (list name '= value))))
   )
 
 (defun send_all_variables(names values);;Asigna todas las variables d ela funcion
@@ -283,28 +338,46 @@
 
 (defun run(code) ;;Defino los parametros que voy a usar y corro el programa
   (setq *variables* (list 'int))
-  (setq *stackvar* nil)
+  (setq *localvar* (list 'int))
+  (setq *stackvar* (list 'int))
   (setq *results* nil)
   (setq *scan_value* nil)
   (setq *constants* (list 'def))
   (setq *funciones* nil)
   (setq *condicionales* (list '== '< '> '<= '>=))
   (setq *separators* (list '+ '- '* '/))
+  (setq *log* nil)
+  (setq *voidvar* (list 'int))
+  (defvar isglobal)
+  (setq isglobal t)
   (runc code)
   *results*)
 
+
 (defun runc(code) ;;"main" del interprete
   (dolist (linecode code 'COMPILATION_SUCCESFUL)
+    (setq *log* (append *log* (list linecode)))
     (cond ((eq (car linecode) 'int) (process_int (cdr linecode)))
-	  ((pert (car linecode) *variables*) (cond ((eq (cadr linecode) '=) (process_intline linecode))
-						   ((eq (cadr linecode) '+=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '+)) (list (cddr linecode)))))
-						   ((eq (cadr linecode) '-=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '-)) (list (cddr linecode)))))
-						   ((eq (cadr linecode) '*=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '*)) (list (cddr linecode)))))
-						   ((eq (cadr linecode) '/=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '/)) (list (cddr linecode)))))
-						   ((eq (cadr linecode) '++) (process_intline (append (list (car linecode) '=) (list (car linecode) '+ '1))))
-						   ((eq (cadr linecode) '--) (process_intline (append (list (car linecode) '=) (list (car linecode) '- '1))))
-						   (t (error 'ERROR_DE_SINTAXIS))))
+	  ((pert (car linecode) *variables*)
+	   (if (null (pert_int (car linecode) *log*))	   
+	       (cond ((eq (cadr linecode) '=) (process_intline linecode t))
+		     ((eq (cadr linecode) '+=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '+)) (list (cddr linecode))) t))
+		     ((eq (cadr linecode) '-=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '-)) (list (cddr linecode))) t))
+		     ((eq (cadr linecode) '*=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '*)) (list (cddr linecode))) t))
+		     ((eq (cadr linecode) '/=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '/)) (list (cddr linecode))) t))
+		     ((eq (cadr linecode) '++) (process_intline (append (list (car linecode) '=) (list (car linecode) '+ '1)) t))
+		     ((eq (cadr linecode) '--) (process_intline (append (list (car linecode) '=) (list (car linecode) '- '1)) t))
+		     (t (error 'ERROR_DE_SINTAXIS)))
 
+	       (cond ((eq (cadr linecode) '=) (process_intline linecode))
+		      ((eq (cadr linecode) '+=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '+)) (list (cddr linecode)))))
+		      ((eq (cadr linecode) '-=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '-)) (list (cddr linecode)))))
+		      ((eq (cadr linecode) '*=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '*)) (list (cddr linecode)))))
+		      ((eq (cadr linecode) '/=) (process_intline (append (append (list (car linecode) '=) (list (car linecode) '/)) (list (cddr linecode)))))
+		      ((eq (cadr linecode) '++) (process_intline (append (list (car linecode) '=) (list (car linecode) '+ '1))))
+		      ((eq (cadr linecode) '--) (process_intline (append (list (car linecode) '=) (list (car linecode) '- '1))))
+		      (t (error 'ERROR_DE_SINTAXIS)))))
+	  
 	  ((eq (car linecode) '++) (process_intline (append (list (cadr linecode) '=) (list (cadr linecode) '+ '1))))
 	  ((eq (car linecode) '--) (process_intline (append (list (cadr linecode) '=) (list (cadr linecode) '- '1))))
 	  ((eq (car linecode) 'printf) (add_result (solveoperation (cond ((atom (cadr linecode)) (cdr linecode))
@@ -314,43 +387,47 @@
 	  ((eq (car linecode) 'scanf) (scan (cadr linecode)))
 	  ((eq (car linecode) 'main) (runc (cadr linecode)))
 	  ((eq (car linecode) 'if) (if (solve_cond (cadr linecode))
-				       (runc (caddr linecode))
+				       (if (eq 'else (cadddr linecode))
+					   (progn (setq *log* (myremove (car (cddddr linecode)) *log*)) (runc (caddr linecode)))
+					   (runc (caddr linecode))
+					   )
 				       (if (eq (cadddr linecode) 'else)
-					   (runc (car (cddddr linecode)))
+					   (progn (setq *log* (myremove (caddr linecode) *log*)) (runc (car (cddddr linecode))))
 					   nil)))
 	  ((eq (car linecode) 'while) (if (solve_cond (cadr linecode))
 					  (progn (runc (caddr linecode)) (runc (list linecode)))
 					  nil))
-	  ((eq (car linecode) 'define) (cond ((not (symbolp (cadr linecode))) (error 'NOMBRE_INVALIDO))8
+	  ((eq (car linecode) 'define) (cond ((not (symbolp (cadr linecode))) (error 'NOMBRE_INVALIDO))
 					    ((not (numberp (caddr linecode))) (error 'VALOR_INVALIDO))
 					    (t (setq *constants* (asignar_valor (cadr linecode) (caddr linecode) *constants*)))))
   
-	  ((eq (car linecode) 'void) (cond ((not (null (pertfun (cadr linecode) *funciones*))) (error 'VARIABLE_YA_DEFINIDA))
+	  ((eq (car linecode) 'void) (cond ((not (null (pertfun (cadr linecode) *funciones*))) (error 'FUNCION_YA_DEFINIDA))
 					   (t (add_funcion (cadr linecode) (caddr linecode) (cadddr linecode)))))
 	  ((pert (car linecode) *funciones*) (runfun (pertfun (car linecode) *funciones*) (void_vars (cadr linecode))))
 	  )))
 
-(run '((int (a = 13)(b = 3)(c = 5))
-       (define cte 7)
-       (void print6 ((int b) (int c)) (
-				       (int (a = 12))
-				       (printf b)
-				       (printf c)
-				       (printf a)
-				       )
-	)
+
+
+(run '((int (a = 10) (b = 20) (c = 30))
+       (void otro () ((int (x = 0))
+		      (if (b < 10)(
+				   (int (a = 15))
+				   (printf a)
+				   )
+			  else (
+			        (a = 12)
+				(while (x <= 3)(
+					       (printf c)
+					       (x ++)
+					       ))
+				))
+		      ))
        (main (
-	      (print6 (10 11))
+	      (otro ())
 	      (printf a)
-	      )
-	)
-       )
-     
-     )
+	      ))))
 
-
-
-
+(untrace runc)
 
 
 
